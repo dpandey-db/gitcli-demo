@@ -79,6 +79,55 @@ print("Repo root:", REPO)
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 0. Make sure Git LFS is installed
+# MAGIC
+# MAGIC Serverless compute ships with `git-lfs`. Classic DBR does not, so if it's missing we
+# MAGIC download the official release binary for this notebook session (no admin rights needed).
+# MAGIC For a permanent setup, attach `scripts/install_git_lfs_init.sh` as a cluster init script.
+# MAGIC
+# MAGIC If the repo was cloned without LFS, its LFS files are only pointers. `git lfs install --local`
+# MAGIC and `git lfs pull` then download the real content.
+
+# COMMAND ----------
+
+import hashlib
+import platform
+import tarfile
+import urllib.request
+
+GIT_LFS_VERSION = "3.8.0"
+GIT_LFS_SHA256 = {
+    "amd64": "e455e00f15d9b95661b8d53498ffb0c3367962cf1ec73c31ab7369516cd6ab8d",
+    "arm64": "ac9c8efac980bb0505ead384d087e2acb6486fd8498691a2165fa174ec6118c2",
+}
+
+if subprocess.run(["git", "lfs", "version"], capture_output=True).returncode != 0:
+    arch = {"x86_64": "amd64", "aarch64": "arm64"}[platform.machine()]
+    name = f"git-lfs-linux-{arch}-v{GIT_LFS_VERSION}.tar.gz"
+    url = f"https://github.com/git-lfs/git-lfs/releases/download/v{GIT_LFS_VERSION}/{name}"
+    install_dir = f"/tmp/git-lfs-{GIT_LFS_VERSION}"
+    tarball = f"/tmp/{name}"
+
+    print("git-lfs not found; downloading", url)
+    urllib.request.urlretrieve(url, tarball)
+    digest = hashlib.sha256(open(tarball, "rb").read()).hexdigest()
+    if digest != GIT_LFS_SHA256[arch]:
+        raise RuntimeError(f"Checksum mismatch for {name}: {digest}")
+    with tarfile.open(tarball) as tf:
+        tf.extract(f"git-lfs-{GIT_LFS_VERSION}/git-lfs", "/tmp", filter="data")
+    os.makedirs(install_dir, exist_ok=True)
+    os.replace(f"/tmp/git-lfs-{GIT_LFS_VERSION}/git-lfs", f"{install_dir}/git-lfs")
+    os.chmod(f"{install_dir}/git-lfs", 0o755)
+    # Only affects git commands started from this notebook's Python process.
+    os.environ["PATH"] = f"{install_dir}:{os.environ['PATH']}"
+
+sh("git lfs version")
+sh("git lfs install --local")  # LFS filters + push hook for this repo only
+sh("git lfs pull")  # replaces any pointer-only files with their real content
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 1. Git CLI and Git LFS are available
 
 # COMMAND ----------

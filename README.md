@@ -27,6 +27,10 @@ All data is synthetic.
 2. Serverless compute is enabled, and serverless can reach `github.com`.
 3. You have a GitHub credential in **Settings → Linked accounts** (a PAT with `repo` scope or the
    GitHub app) that can read and write this repo.
+4. **Classic compute (DBR 17.0+) only:** classic DBR doesn't include `git-lfs`. Attach
+   `scripts/install_git_lfs_init.sh` as a cluster init script *before* cloning, so clones download
+   LFS content. Without it, the notebook installs `git-lfs` for its own session and runs
+   `git lfs pull` to replace pointer files, but the web terminal won't have LFS.
 
 ## Run the demo
 
