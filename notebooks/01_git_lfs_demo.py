@@ -24,9 +24,34 @@ import os
 import shlex
 import subprocess
 
-REPO = subprocess.run(
-    ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
-).stdout.strip()
+
+def find_repo_root() -> str:
+    """Walk up from this notebook's folder to the Git folder root (the dir containing .git).
+
+    Uses the notebook path rather than the working directory, which differs between
+    serverless and classic compute.
+    """
+    nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+    path = os.path.dirname(f"/Workspace{nb_path}")
+    while path != "/":
+        if os.path.exists(os.path.join(path, ".git")):
+            return path
+        path = os.path.dirname(path)
+    raise RuntimeError(f"No .git found above {nb_path}. Is this notebook in a Git folder with Git CLI access?")
+
+
+REPO = find_repo_root()
+
+# On classic compute, workspace files can be owned by a different OS user than the notebook
+# process, and Git refuses to use them ("dubious ownership"). Trust only this repo, and only
+# for git commands launched from this notebook (nothing is written to global Git config).
+_check = subprocess.run(["git", "-C", REPO, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+if "dubious ownership" in _check.stderr:
+    n = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    os.environ.update({"GIT_CONFIG_COUNT": str(n + 1), f"GIT_CONFIG_KEY_{n}": "safe.directory", f"GIT_CONFIG_VALUE_{n}": REPO})
+    _check = subprocess.run(["git", "-C", REPO, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+if _check.returncode != 0:
+    raise RuntimeError(f"git can't open {REPO}:\n{_check.stderr}")
 
 
 def sh(cmd: str, cwd: str = REPO, check: bool = True, env: dict | None = None) -> str:
