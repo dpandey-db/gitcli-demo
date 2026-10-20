@@ -123,7 +123,7 @@ if subprocess.run(["git", "lfs", "version"], capture_output=True).returncode != 
 
 sh("git lfs version")
 sh("git lfs install --local")  # LFS filters + push hook for this repo only
-sh("git lfs pull")  # replaces any pointer-only files with their real content
+_ = sh("git lfs pull")  # replaces any pointer-only files with their real content
 
 # COMMAND ----------
 
@@ -136,7 +136,7 @@ sh("git --version")
 sh("git lfs version")
 sh("git remote -v")
 sh("git status --short --branch")
-sh("git log --oneline -5")
+_ = sh("git log --oneline -5")
 
 # COMMAND ----------
 
@@ -150,7 +150,7 @@ sh("git log --oneline -5")
 # COMMAND ----------
 
 sh("cat .gitattributes")
-sh("git lfs ls-files --size")
+_ = sh("git lfs ls-files --size")
 
 # COMMAND ----------
 
@@ -170,7 +170,7 @@ sh("git cat-file -p HEAD:data/transactions.parquet")
 sh("git cat-file -s HEAD:data/transactions.parquet  # blob size in bytes")
 
 print("---- What Git stores for the regular CSV file ----")
-sh("git cat-file -s HEAD:data/transactions_sample.csv  # blob size in bytes")
+_ = sh("git cat-file -s HEAD:data/transactions_sample.csv  # blob size in bytes")
 
 # COMMAND ----------
 
@@ -269,7 +269,7 @@ sh("git lfs ls-files", cwd=SCRATCH)
 print("---- Pull only the model files ----")
 sh('git lfs pull --include="models/*"', cwd=SCRATCH)
 sh("ls -l data/ models/", cwd=SCRATCH)
-sh("git lfs ls-files", cwd=SCRATCH)
+_ = sh("git lfs ls-files", cwd=SCRATCH)
 
 # COMMAND ----------
 
@@ -295,7 +295,7 @@ if not sh("git config user.email", check=False).strip():
     sh(f"git config user.email {shlex.quote(user)}")
     sh(f"git config user.name {shlex.quote(user.split('@')[0])}")
 
-sh(f"git switch -c {shlex.quote(branch)}")
+_ = sh(f"git switch -c {shlex.quote(branch)}")
 
 # COMMAND ----------
 
@@ -330,7 +330,7 @@ np.savez(
 high_risk = tx.assign(fraud_score=score_v2).nlargest(250_000, "fraud_score")
 high_risk.to_parquet(f"{REPO}/data/high_risk_transactions.parquet", index=False)
 
-sh("ls -lh models/ data/")
+_ = sh("ls -lh models/ data/")
 
 # COMMAND ----------
 
@@ -343,7 +343,7 @@ sh("ls -lh models/ data/")
 sh("git add models/fraud_model_v2.npz data/high_risk_transactions.parquet")
 sh("git lfs status")
 sh('git commit -m "Add v2 fraud model and high-risk transactions (Git LFS, created in Databricks)"')
-sh(f"git push -u origin {shlex.quote(branch)}")
+_ = sh(f"git push -u origin {shlex.quote(branch)}")
 
 # COMMAND ----------
 
