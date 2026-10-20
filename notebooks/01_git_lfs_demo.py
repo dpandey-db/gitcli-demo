@@ -1,27 +1,27 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Git LFS in Databricks Git folders (Git CLI preview)
+# MAGIC # Copy a Git LFS file from a Git folder to workspace files and a volume
 # MAGIC
-# MAGIC This notebook runs **inside a Git folder that has Git CLI access** and shows that
-# MAGIC Git Large File Storage (LFS) works end to end in Databricks:
+# MAGIC This notebook runs inside a **Git folder with Git CLI access** and shows how to take a large
+# MAGIC file stored with Git LFS and copy it to a workspace folder and a Unity Catalog volume.
 # MAGIC
-# MAGIC | Step | What you'll see |
-# MAGIC |---|---|
-# MAGIC | 1 | `git` and `git lfs` are available and the folder is a real Git working tree |
-# MAGIC | 2 | Which files are tracked by LFS (`.gitattributes`, `git lfs ls-files`) |
-# MAGIC | 3 | What Git actually stores for an LFS file: a ~130-byte **pointer** instead of 60 MB |
-# MAGIC | 4 | The LFS-tracked Parquet file, model, and image are fully usable from the notebook |
-# MAGIC | 5 | A pointer-only clone and a selective `git lfs pull` |
-# MAGIC | 6 | Create a new LFS artifact in Databricks, then commit and push it to a branch |
+# MAGIC 1. Make sure `git-lfs` is available and download the LFS content (`git lfs pull`)
+# MAGIC 2. Confirm the file is real content, not an LFS pointer
+# MAGIC 3. Copy it to a workspace folder and a volume, and verify each copy's checksum
+# MAGIC 4. Read the copy from the volume with Spark
 # MAGIC
-# MAGIC **Requirements:** serverless compute (environment version 5+) or DBR 17.0+, the
-# MAGIC *Git CLI support for Git folders* preview enabled, and a GitHub Git credential configured
-# MAGIC in **Settings → Linked accounts**.
+# MAGIC **Requirements:** the *Git CLI support for Git folders* preview, serverless compute
+# MAGIC (environment version 5+) or DBR 17.0+, and `WRITE VOLUME` on the target volume.
+
+# COMMAND ----------
+
+dbutils.widgets.text("lfs_file", "data/transactions.parquet", "LFS file (repo-relative)")
+dbutils.widgets.text("workspace_dir", "", "Workspace target dir (blank = ~/lfs_demo_output)")
+dbutils.widgets.text("volume_dir", "/Volumes/devanshu_pandey/boc/documents/lfs_demo", "Volume target dir")
 
 # COMMAND ----------
 
 import os
-import shlex
 import subprocess
 
 
@@ -54,17 +54,10 @@ if _check.returncode != 0:
     raise RuntimeError(f"git can't open {REPO}:\n{_check.stderr}")
 
 
-def sh(cmd: str, cwd: str = REPO, check: bool = True, env: dict | None = None) -> str:
+def sh(cmd: str, cwd: str = REPO, check: bool = True) -> str:
     """Run a shell command, echo it like a terminal, and return its stdout."""
     print(f"$ {cmd}")
-    result = subprocess.run(
-        cmd,
-        shell=True,
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        env={**os.environ, **(env or {})},
-    )
+    result = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
     out = (result.stdout + result.stderr).rstrip()
     if out:
         print(out)
@@ -74,19 +67,22 @@ def sh(cmd: str, cwd: str = REPO, check: bool = True, env: dict | None = None) -
     return result.stdout
 
 
+LFS_FILE = dbutils.widgets.get("lfs_file")
+SRC = os.path.join(REPO, LFS_FILE)
 print("Repo root:", REPO)
+print("LFS file: ", SRC)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 0. Make sure Git LFS is installed
+# MAGIC ## 1. Make sure Git LFS is available and download the content
 # MAGIC
-# MAGIC Serverless compute ships with `git-lfs`. Classic DBR does not, so if it's missing we
-# MAGIC download the official release binary for this notebook session (no admin rights needed).
-# MAGIC For a permanent setup, attach `scripts/install_git_lfs_init.sh` as a cluster init script.
+# MAGIC Serverless compute includes `git-lfs`. Classic DBR does not, so if it's missing we download
+# MAGIC the official release binary for this notebook session (no admin rights needed). For a
+# MAGIC permanent setup on classic compute, use `scripts/install_git_lfs_init.sh` as a cluster init script.
 # MAGIC
-# MAGIC If the repo was cloned without LFS, its LFS files are only pointers. `git lfs install --local`
-# MAGIC and `git lfs pull` then download the real content.
+# MAGIC A new Git folder may contain only LFS **pointers** (small text files). `git lfs pull` replaces
+# MAGIC them with the real content. It's safe to re-run: files already downloaded are skipped.
 
 # COMMAND ----------
 
@@ -122,247 +118,91 @@ if subprocess.run(["git", "lfs", "version"], capture_output=True).returncode != 
     os.environ["PATH"] = f"{install_dir}:{os.environ['PATH']}"
 
 sh("git lfs version")
-sh("git lfs install --local")  # LFS filters + push hook for this repo only
-_ = sh("git lfs pull")  # replaces any pointer-only files with their real content
+sh("git lfs install --local")  # enable LFS for this repo only
+_ = sh("git lfs ls-files --size")  # '-' = pointer only, '*' = content downloaded
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## 1. Git CLI and Git LFS are available
-
-# COMMAND ----------
-
-sh("git --version")
-sh("git lfs version")
-sh("git remote -v")
-sh("git status --short --branch")
-_ = sh("git log --oneline -5")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 2. Which files does LFS manage?
-# MAGIC
-# MAGIC `.gitattributes` declares the patterns. `git lfs ls-files` lists every file in the
-# MAGIC current commit that is stored in LFS, with its size. A `*` after the object ID means the
-# MAGIC real content is checked out locally (a `-` would mean only the pointer is present).
-
-# COMMAND ----------
-
-sh("cat .gitattributes")
+_ = sh(f'git lfs pull --include="{LFS_FILE}"')  # drop --include to download every LFS file
 _ = sh("git lfs ls-files --size")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 3. Pointer vs. content
+# MAGIC ## 2. Confirm it's real content, not a pointer
 # MAGIC
-# MAGIC The working tree has the real 60 MB Parquet file, but the Git object database only
-# MAGIC stores a tiny text pointer containing the SHA-256 and size of the content. Compare
-# MAGIC that with the small CSV, which is a normal Git blob.
+# MAGIC Git itself stores only a ~130-byte pointer with the file's SHA-256 (`oid`) and size. After
+# MAGIC `git lfs pull`, the file in the Git folder must match that size and checksum.
 
 # COMMAND ----------
 
-sh("ls -lh data/ models/ assets/")
+pointer = sh(f"git cat-file -p HEAD:{LFS_FILE}")
+fields = dict(line.split(" ", 1) for line in pointer.strip().splitlines())
+EXPECTED_OID = fields["oid"].removeprefix("sha256:")
+EXPECTED_SIZE = int(fields["size"])
 
-print("---- What Git stores for the LFS-tracked Parquet file ----")
-sh("git cat-file -p HEAD:data/transactions.parquet")
-sh("git cat-file -s HEAD:data/transactions.parquet  # blob size in bytes")
 
-print("---- What Git stores for the regular CSV file ----")
-_ = sh("git cat-file -s HEAD:data/transactions_sample.csv  # blob size in bytes")
+def sha256_of(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8 * 1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def verify(path: str) -> None:
+    size = os.path.getsize(path)
+    if size != EXPECTED_SIZE or sha256_of(path) != EXPECTED_OID:
+        raise RuntimeError(
+            f"{path} is {size:,} bytes but the LFS pointer says {EXPECTED_SIZE:,}. "
+            "It is probably still a pointer: check the `git lfs pull` output above."
+        )
+    print(f"OK  {path}  ({size / 1e6:,.1f} MB, sha256 {EXPECTED_OID[:12]}…)")
+
+
+verify(SRC)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. Use the LFS-tracked files like any other workspace file
-# MAGIC
-# MAGIC LFS is transparent: once the content is checked out, Pandas, NumPy, and Spark read the
-# MAGIC files as usual.
+# MAGIC ## 3. Copy to a workspace folder and a Unity Catalog volume
 
 # COMMAND ----------
 
-import numpy as np
-import pandas as pd
+import shutil
 
-tx = pd.read_parquet(f"{REPO}/data/transactions.parquet")
-print(f"{len(tx):,} rows, {tx.memory_usage(deep=True).sum() / 1e6:,.0f} MB in memory")
-display(tx.head(20))
-
-# COMMAND ----------
-
-display(
-    tx.groupby("category")
-    .agg(transactions=("transaction_id", "count"), fraud_rate=("is_fraud", "mean"), avg_amount=("amount", "mean"))
-    .sort_values("fraud_rate", ascending=False)
-    .reset_index()
-)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Load the versioned model (also stored in LFS) and score the data
-
-# COMMAND ----------
-
-
-def featurize(df: pd.DataFrame) -> np.ndarray:
-    # Must match scripts/generate_assets.py
-    return np.column_stack(
-        [
-            np.ones(len(df)),
-            np.log1p(df["amount"].to_numpy()),
-            df["is_foreign"].to_numpy(dtype=float),
-            ((df["hour"] <= 4) | (df["hour"] >= 23)).to_numpy(dtype=float),
-            df["category"].isin(["electronics", "travel", "online"]).to_numpy(dtype=float),
-            (df["channel"] == "online").to_numpy(dtype=float),
-        ]
-    )
-
-
-def lift_at_top(y: np.ndarray, score: np.ndarray, pct: float = 0.01) -> float:
-    """Fraud rate in the top `pct` of scores divided by the overall fraud rate."""
-    top = np.argsort(-score)[: int(len(score) * pct)]
-    return y[top].mean() / y.mean()
-
-
-model_v1 = np.load(f"{REPO}/models/fraud_model_v1.npz")
-w1 = model_v1["weights"]
-print("Model version:", model_v1["version"])
-display(pd.DataFrame({"feature": model_v1["feature_names"], "weight": w1}))
-
-y = tx["is_fraud"].to_numpy(dtype=float)
-score_v1 = 1 / (1 + np.exp(-featurize(tx) @ w1))
-print(f"v1 lift in top 1% of scores: {lift_at_top(y, score_v1):.2f}x")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Display the LFS-tracked image
-
-# COMMAND ----------
-
-from IPython.display import Image
-
-Image(filename=f"{REPO}/assets/fraud_rate_by_category.png", width=700)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 5. Pointer-only clone and selective download
-# MAGIC
-# MAGIC Large repos don't have to download every LFS object. With `GIT_LFS_SKIP_SMUDGE=1`, a clone
-# MAGIC checks out only the pointers; `git lfs pull --include` then fetches only what you need.
-# MAGIC Here we clone this Git folder into local scratch space to show it.
-
-# COMMAND ----------
-
-SCRATCH = "/tmp/lfs-pointer-clone"
-sh(f"rm -rf {SCRATCH}")
-sh(f"git clone --quiet file://{REPO} {SCRATCH}", env={"GIT_LFS_SKIP_SMUDGE": "1"})
-
-print("---- After a pointer-only clone: files are tiny pointers ----")
-sh("ls -l data/ models/ assets/", cwd=SCRATCH)
-sh("cat models/fraud_model_v1.npz", cwd=SCRATCH)
-sh("git lfs ls-files", cwd=SCRATCH)
-
-print("---- Pull only the model files ----")
-sh('git lfs pull --include="models/*"', cwd=SCRATCH)
-sh("ls -l data/ models/", cwd=SCRATCH)
-_ = sh("git lfs ls-files", cwd=SCRATCH)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 6. Create a new LFS artifact in Databricks and push it
-# MAGIC
-# MAGIC We train a **v2** model with one extra feature, write it plus a Parquet file of
-# MAGIC high-risk transactions, and commit both on a new branch. Because the paths match the
-# MAGIC `.gitattributes` patterns, Git LFS handles them automatically: no extra commands.
-# MAGIC
-# MAGIC The push uploads the LFS objects to GitHub's LFS store first, then pushes the commit. The
-# MAGIC workspace Git credential is used automatically.
-
-# COMMAND ----------
-
-dbutils.widgets.text("branch", "", "Branch to push (blank = auto)")
 user = spark.sql("SELECT current_user()").first()[0]
-branch = dbutils.widgets.get("branch") or f"lfs-demo/{user.split('@')[0]}-{pd.Timestamp.now():%Y%m%d-%H%M%S}"
-print("Branch:", branch)
+workspace_dir = dbutils.widgets.get("workspace_dir") or f"/Workspace/Users/{user}/lfs_demo_output"
+volume_dir = dbutils.widgets.get("volume_dir")
 
-# Use the workspace user as the commit identity if none is configured.
-if not sh("git config user.email", check=False).strip():
-    sh(f"git config user.email {shlex.quote(user)}")
-    sh(f"git config user.name {shlex.quote(user.split('@')[0])}")
-
-_ = sh(f"git switch -c {shlex.quote(branch)}")
-
-# COMMAND ----------
-
-
-def featurize_v2(df: pd.DataFrame) -> np.ndarray:
-    # v1 features + "amount over $500"
-    return np.column_stack([featurize(df), (df["amount"] > 500).to_numpy(dtype=float)])
-
-
-def train_logreg(X: np.ndarray, y: np.ndarray, iters: int = 15) -> np.ndarray:
-    w = np.zeros(X.shape[1])
-    for _ in range(iters):
-        p = 1 / (1 + np.exp(-X @ w))
-        hessian = (X * (p * (1 - p))[:, None]).T @ X
-        w -= np.linalg.solve(hessian, X.T @ (p - y))
-    return w
-
-
-train = tx.sample(500_000, random_state=7)
-w2 = train_logreg(featurize_v2(train), train["is_fraud"].to_numpy(dtype=float))
-score_v2 = 1 / (1 + np.exp(-featurize_v2(tx) @ w2))
-print(f"v1 lift in top 1%: {lift_at_top(y, score_v1):.2f}x")
-print(f"v2 lift in top 1%: {lift_at_top(y, score_v2):.2f}x")
-
-np.savez(
-    f"{REPO}/models/fraud_model_v2.npz",
-    weights=w2,
-    feature_names=np.append(model_v1["feature_names"], "amount_gt_500"),
-    version=np.array("v2"),
-)
-
-high_risk = tx.assign(fraud_score=score_v2).nlargest(250_000, "fraud_score")
-high_risk.to_parquet(f"{REPO}/data/high_risk_transactions.parquet", index=False)
-
-_ = sh("ls -lh models/ data/")
+copies = []
+for target_dir in (workspace_dir, volume_dir):
+    os.makedirs(target_dir, exist_ok=True)
+    dest = os.path.join(target_dir, os.path.basename(LFS_FILE))
+    shutil.copyfile(SRC, dest)
+    verify(dest)
+    copies.append(dest)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC `git lfs status` confirms the new files will be committed as LFS objects (`LFS: <oid>`)
-# MAGIC rather than regular Git blobs.
+# MAGIC ## 4. Use the copy from the volume
 
 # COMMAND ----------
 
-sh("git add models/fraud_model_v2.npz data/high_risk_transactions.parquet")
-sh("git lfs status")
-sh('git commit -m "Add v2 fraud model and high-risk transactions (Git LFS, created in Databricks)"')
-_ = sh(f"git push -u origin {shlex.quote(branch)}")
-
-# COMMAND ----------
-
-sh("git lfs ls-files --size")
-remote = sh("git remote get-url origin").strip().removesuffix(".git")
-displayHTML(
-    f'Open <a href="{remote}/tree/{branch}/data" target="_blank">{remote}/tree/{branch}/data</a> '
-    "and click a Parquet file: GitHub shows <b>Stored with Git LFS</b>."
-)
+volume_copy = copies[1]
+df = spark.read.parquet(volume_copy)
+print(f"{df.count():,} rows read from {volume_copy}")
+display(df.limit(10))
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Clean up (optional)
 # MAGIC
-# MAGIC Switch the Git folder back to `main` and delete the demo branch locally and on GitHub.
+# MAGIC Removes only the copies this notebook made, not the target folders or the volume.
 
 # COMMAND ----------
 
-# sh("git switch main")
-# sh(f"git branch -D {shlex.quote(branch)}")
-# sh(f"git push origin --delete {shlex.quote(branch)}")
+# for path in copies:
+#     os.remove(path)
