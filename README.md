@@ -39,8 +39,8 @@ All data is synthetic.
 
    ```bash
    cd /Workspace/Users/<your-email>/
-   git clone https://github.com/devanshu-pandey_data/boc-git-cli-test.git
-   cd boc-git-cli-test
+   git clone https://github.com/dpandey-db/gitcli-demo.git
+   cd gitcli-demo
    git lfs ls-files --size     # LFS objects are already downloaded
    ls -lh data/                # transactions.parquet is the real ~60 MB file
    git cat-file -p HEAD:data/transactions.parquet   # ...but Git only stores a pointer
