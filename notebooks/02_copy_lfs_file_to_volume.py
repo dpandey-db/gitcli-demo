@@ -15,6 +15,10 @@
 # MAGIC Serverless compute includes Git LFS. On classic compute, this cell downloads the official Git LFS
 # MAGIC release, checks its SHA-256 checksum, and makes it available to the rest of this notebook.
 # MAGIC Nothing is installed on the cluster itself.
+# MAGIC
+# MAGIC This cell uses Git LFS version 3.8.0. To use a different version, update `version` and both
+# MAGIC checksums with the values from that release's `sha256sums.asc` file on the
+# MAGIC [Git LFS releases page](https://github.com/git-lfs/git-lfs/releases).
 
 # COMMAND ----------
 
