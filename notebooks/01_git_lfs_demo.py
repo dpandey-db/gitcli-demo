@@ -78,8 +78,7 @@ print("LFS file: ", SRC)
 # MAGIC ## 1. Make sure Git LFS is available and download the content
 # MAGIC
 # MAGIC Serverless compute includes `git-lfs`. Classic DBR does not, so if it's missing we download
-# MAGIC the official release binary for this notebook session (no admin rights needed). For a
-# MAGIC permanent setup on classic compute, use `scripts/install_git_lfs_init.sh` as a cluster init script.
+# MAGIC the official release binary for this notebook session (no admin rights needed).
 # MAGIC
 # MAGIC A new Git folder may contain only LFS **pointers** (small text files). `git lfs pull` replaces
 # MAGIC them with the real content. It's safe to re-run: files already downloaded are skipped.

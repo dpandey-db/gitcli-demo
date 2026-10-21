@@ -13,7 +13,6 @@ Catalog volume.
 | `data/transactions_sample.csv` | 1,000-row sample | Regular Git, for comparison |
 | `.gitattributes` | LFS tracking rules | Regular Git |
 | `notebooks/01_git_lfs_demo.py` | The demo notebook | Regular Git |
-| `scripts/install_git_lfs_init.sh` | Cluster init script that installs `git-lfs` on classic DBR | Regular Git |
 | `scripts/generate_assets.py` | Regenerates the LFS assets locally | Regular Git |
 
 All data is synthetic.
@@ -24,9 +23,8 @@ All data is synthetic.
 2. Serverless compute is enabled, and serverless can reach `github.com`.
 3. You have a GitHub credential in **Settings → Linked accounts** that can read this repo.
 4. `WRITE VOLUME` on the target volume (set in the notebook's `volume_dir` widget).
-5. **Classic compute (DBR 17.0+) only:** classic DBR includes `git` but not `git-lfs`. The notebook
-   installs it for its own session if it's missing. For the web terminal and other notebooks on
-   the cluster, attach `scripts/install_git_lfs_init.sh` as a cluster init script.
+5. **Classic compute (DBR 17.0+) only:** classic DBR includes `git` but not `git-lfs`. The notebooks
+   download it for their own session if it's missing. Nothing is installed on the cluster.
 
 ## Run the demo
 
