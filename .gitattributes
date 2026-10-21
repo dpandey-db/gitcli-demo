@@ -1,18 +1,5 @@
 # Git LFS tracking rules.
-# Anything matching these patterns is stored in Git as a small pointer file;
-# the actual bytes live in the LFS store on GitHub and are downloaded on checkout.
+# Files matching these patterns are stored in Git as a small pointer file;
+# the actual bytes live in the LFS store and are downloaded with `git lfs pull`.
 
-# Large data files
 *.parquet filter=lfs diff=lfs merge=lfs -text
-data/raw/** filter=lfs diff=lfs merge=lfs -text
-
-# Model artifacts
-*.npz filter=lfs diff=lfs merge=lfs -text
-*.joblib filter=lfs diff=lfs merge=lfs -text
-*.pkl filter=lfs diff=lfs merge=lfs -text
-
-# Binary media
-*.png filter=lfs diff=lfs merge=lfs -text
-
-# Small CSV samples are intentionally NOT tracked by LFS, so you can
-# compare a normal Git blob with an LFS pointer side by side.

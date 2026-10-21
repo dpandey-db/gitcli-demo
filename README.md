@@ -9,11 +9,10 @@ Catalog volume.
 | Path | Size | Stored as |
 |---|---|---|
 | `data/transactions.parquet` | ~60 MB, 3M synthetic card transactions | **Git LFS** |
-| `models/fraud_model_v1.npz`, `assets/fraud_rate_by_category.png` | Small extra binaries | **Git LFS** |
-| `data/transactions_sample.csv` | 1,000-row sample | Regular Git, for comparison |
 | `.gitattributes` | LFS tracking rules | Regular Git |
-| `notebooks/01_git_lfs_demo.py` | The demo notebook | Regular Git |
-| `scripts/generate_assets.py` | Regenerates the LFS assets locally | Regular Git |
+| `notebooks/02_copy_lfs_file_to_volume.py` | The demo notebook | Regular Git |
+| `notebooks/01_git_lfs_demo.py` | Extended version with checksum checks and a workspace-folder copy | Regular Git |
+| `scripts/generate_assets.py` | Regenerates the Parquet file locally | Regular Git |
 
 All data is synthetic.
 
@@ -22,20 +21,24 @@ All data is synthetic.
 1. A workspace admin enables **Git CLI support for Git folders** on the **Previews** page.
 2. Serverless compute is enabled, and serverless can reach `github.com`.
 3. You have a GitHub credential in **Settings → Linked accounts** that can read this repo.
-4. `WRITE VOLUME` on the target volume (set in the notebook's `volume_dir` widget).
+4. `WRITE VOLUME` on the target volume.
 5. **Classic compute (DBR 17.0+) only:** classic DBR includes `git` but not `git-lfs`. The notebooks
    download it for their own session if it's missing. Nothing is installed on the cluster.
 
 ## Run the demo
 
 1. Create a Git folder for this repo: **Workspace → Create → Git folder**, then paste the repo URL.
-2. Open `notebooks/01_git_lfs_demo`, attach serverless compute (environment version 5 or above)
-   or a DBR 17.0+ cluster, set the widgets, and run it top to bottom. The notebook:
-   1. Makes sure `git-lfs` is available and runs `git lfs pull` for the file. A new Git folder may
-      contain only LFS pointer files until you do this.
-   2. Checks that the file's size and SHA-256 match the LFS pointer, which proves it's the real content.
-   3. Copies it to a workspace folder and the volume, and checks each copy the same way.
-   4. Reads the copy from the volume with Spark.
+2. Open `notebooks/02_copy_lfs_file_to_volume`, attach serverless compute (environment version 5
+   or above) or a DBR 17.0+ cluster, change the volume path to one you can write to, and run it
+   top to bottom. The notebook:
+   1. Downloads Git LFS for the notebook session if the compute doesn't include it.
+   2. Turns on Git LFS for the repository and lists the files it tracks.
+   3. Runs `git lfs pull` to download the full file. A new Git folder may contain only LFS pointer
+      files until you do this.
+   4. Copies the Parquet file to the volume and reads it with Spark.
+
+`notebooks/01_git_lfs_demo` does the same, and also checks that each copy's SHA-256 matches the LFS
+pointer and copies the file to a workspace folder. Set its widgets before running it.
 
 ## Talking points
 
